@@ -3,7 +3,7 @@ workflows:
     name: iOS → TestFlight (auto-sign)
     environment:
       flutter: stable
-      xcode: 16.4            # (Codemagic'te mevcut bir sürüm; gerekirse güncelleyebilirsiniz)
+      xcode: 16.4
       cocoapods: default
       ios_signing:
         distribution_type: app_store
@@ -11,25 +11,50 @@ workflows:
       vars:
         BUNDLE_ID: com.yalpertem.simpleweather
         APP_STORE_APP_ID: 6751532679
+        # İstersen sabitle (Apple Developer > Membership’ten al)
+        # DEVELOPMENT_TEAM: ABCDE12345
     integrations:
-      app_store_connect: ios_cert_generated   # Codemagic’teki entegrasyon adınız
+      app_store_connect: ios_cert_generated
+
     scripts:
       - name: Flutter pub get
         script: flutter pub get
 
-      - name: Ensure Bundle ID in Xcode project
+      - name: Assert & fix Bundle ID / Team in Xcode project
         script: |
-          # project.pbxproj içinde tüm bundle id'leri sabitle
+          # Bundle ID’leri sabitle
           perl -0777 -pe 's/PRODUCT_BUNDLE_IDENTIFIER = .*?;/PRODUCT_BUNDLE_IDENTIFIER = '"$BUNDLE_ID"';/g' -i ios/Runner.xcodeproj/project.pbxproj
+          # (Opsiyonel) Team ID sabitle
+          if [ -n "$DEVELOPMENT_TEAM" ]; then
+            perl -0777 -pe 's/DEVELOPMENT_TEAM = .*?;/DEVELOPMENT_TEAM = '"$DEVELOPMENT_TEAM"';/g' -i ios/Runner.xcodeproj/project.pbxproj
+          fi
+          echo "==> Current identifiers in project:"
+          grep -R "PRODUCT_BUNDLE_IDENTIFIER" -n ios/Runner.xcodeproj/project.pbxproj || true
+          grep -R "DEVELOPMENT_TEAM" -n ios/Runner.xcodeproj/project.pbxproj || true
 
-      - name: Fetch & apply signing (profiles + certs)
+      - name: Fetch & apply signing (profiles + certs) + DIAG
         script: |
+          set -e
           keychain initialize
+
+          echo "==> Whoami on App Store Connect (team kontrolü için):"
+          app-store-connect list-profiles --bundle-id "$BUNDLE_ID" --type IOS_APP_STORE || true
+
+          echo "==> Fetch signing files (create if missing)"
           app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+
+          echo "==> Install certs to keychain"
           keychain add-certificates
+
+          echo "==> Apply provisioning profiles to Xcode project"
           xcode-project use-profiles
-          # (Opsiyonel teşhis)
+
+          echo "==> Print signing settings"
           xcode-project print-signing-settings
+
+          echo "==> Local profiles list:"
+          ls -al "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          /usr/libexec/PlistBuddy -c "Print :Name" "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision 2>/dev/null | sed 's/^/  - /' || true
 
       - name: Set build number from Codemagic
         script: |
@@ -49,4 +74,3 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
-        # submit_to_beta_review: true
