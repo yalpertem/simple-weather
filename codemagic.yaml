@@ -3,6 +3,8 @@ workflows:
     name: iOS → TestFlight (auto-sign)
     environment:
       flutter: stable
+      xcode: 16.4            # (Codemagic'te mevcut bir sürüm; gerekirse güncelleyebilirsiniz)
+      cocoapods: default
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.yalpertem.simpleweather
@@ -10,21 +12,41 @@ workflows:
         BUNDLE_ID: com.yalpertem.simpleweather
         APP_STORE_APP_ID: 6751532679
     integrations:
-      app_store_connect: "ios_cert_generated"
+      app_store_connect: ios_cert_generated   # Codemagic’teki entegrasyon adınız
     scripts:
       - name: Flutter pub get
         script: flutter pub get
+
+      - name: Ensure Bundle ID in Xcode project
+        script: |
+          # project.pbxproj içinde tüm bundle id'leri sabitle
+          perl -0777 -pe 's/PRODUCT_BUNDLE_IDENTIFIER = .*?;/PRODUCT_BUNDLE_IDENTIFIER = '"$BUNDLE_ID"';/g' -i ios/Runner.xcodeproj/project.pbxproj
+
+      - name: Fetch & apply signing (profiles + certs)
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+          # (Opsiyonel teşhis)
+          xcode-project print-signing-settings
+
       - name: Set build number from Codemagic
         script: |
           BUILD_NUMBER=${CM_BUILD_ID:-1}
           /usr/libexec/PlistBuddy -c "Set CFBundleVersion $BUILD_NUMBER" ios/Runner/Info.plist
+
       - name: Build iOS IPA
-        script: flutter build ipa --release
+        script: |
+          flutter clean
+          flutter build ipa --release
+
     artifacts:
       - build/ios/ipa/*.ipa
       - flutter_drive.log
+
     publishing:
       app_store_connect:
-        auth: integration              # <-- use the UI integration
+        auth: integration
         submit_to_testflight: true
-        # submit_to_beta_review: true  # enable when you want external testers
+        # submit_to_beta_review: true
