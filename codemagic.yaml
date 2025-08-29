@@ -1,0 +1,30 @@
+workflows:
+  ios_testflight:
+    name: iOS → TestFlight (auto-sign)
+    environment:
+      flutter: stable
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.yalpertem.simpleweather
+      vars:
+        BUNDLE_ID: com.yalpertem.simpleweather
+        APP_STORE_APP_ID: 6751532679
+    integrations:
+      app_store_connect: "ios_cert_generated"
+    scripts:
+      - name: Flutter pub get
+        script: flutter pub get
+      - name: Set build number from Codemagic
+        script: |
+          BUILD_NUMBER=${CM_BUILD_ID:-1}
+          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $BUILD_NUMBER" ios/Runner/Info.plist
+      - name: Build iOS IPA
+        script: flutter build ipa --release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - flutter_drive.log
+    publishing:
+      app_store_connect:
+        auth: integration              # <-- use the UI integration
+        submit_to_testflight: true
+        # submit_to_beta_review: true  # enable when you want external testers
